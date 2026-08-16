@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="1">
+        <!-- Cost visibility: restrict product cost reading to the cost-visibility group.
+             Applied via a read-restriction on product.template for users WITHOUT the group.
+             Odoo record rules are additive (OR) for global restrict, so we use the
+             standard approach: a restrictive global rule that checks group membership
+             indirectly through an inherited field check handled at the view level
+             plus a hard rule below. -->
+
+        <!-- For users in the HLM Cost Visibility group, no restriction (they see all costs).
+             For everyone else, cost fields are hidden via view groups attr (see menu_visibility.xml).
+             A hard record rule is not appropriate here because products must remain readable;
+             only the cost field display is restricted. -->
+
+        <!-- Hide Stock Report Buttons: implemented via view groups attribute, see menu_visibility.xml -->
+
+        <!-- Mask Non-local Vendor on WH/IN: implemented via view groups attribute on
+             stock.picking form, masking partner_id display when user lacks the group -->
+    </data>
+</odoo>

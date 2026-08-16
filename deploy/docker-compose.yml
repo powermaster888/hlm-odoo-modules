@@ -1,0 +1,205 @@
+services:
+  odoo-community-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: odoo
+      POSTGRES_USER: odoo
+      POSTGRES_PASSWORD: "LJZkMEV1Nq-delzhTZpvMSGeDvXkEW5m"
+    volumes:
+      - odoo-community-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U odoo -d odoo"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks:
+      - default
+
+  odoo-community-addons:
+    image: alpine/git:latest
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        DEST=/mnt/extra-addons
+        mkdir -p "$$DEST"
+        rm -rf "$$DEST"/* /tmp/src 2>/dev/null || true
+        fetch() {
+          repo="$$1"; sha="$$2"; shift 2
+          echo "[addons] $$repo @ $$sha"
+          git init -q /tmp/src
+          cd /tmp/src
+          git remote add origin "https://github.com/$$repo.git"
+          git fetch -q --depth 1 origin "$$sha"
+          git checkout -q FETCH_HEAD
+          for m in "$$@"; do
+            if [ -d "/tmp/src/$$m" ]; then
+              cp -r "/tmp/src/$$m" "$$DEST/"
+            else
+              echo "MISSING $$m in $$repo"; exit 1
+            fi
+          done
+          rm -rf /tmp/src
+        }
+        fetch odoomates/odooapps 61ad834d7f2ae7fb32c80d054f8a8f72c552b240 om_account_accountant om_account_asset om_account_budget om_account_daily_reports om_account_followup om_fiscal_year om_recurring_payments accounting_pdf_reports
+        fetch OCA/account-financial-reporting fa92a268fb9c7b60087174ef9ce1c48931a96a70 account_financial_report account_tax_balance partner_statement
+        fetch OCA/account-reconcile a9bbab67e42f3b762e9c34b30b6c1a77f9c373fb account_reconcile_oca account_statement_base
+        fetch OCA/reporting-engine 1c697aac5c42d87b7c0eada72508ee968772de67 report_xlsx report_xlsx_helper
+        fetch OCA/server-ux 1372e6489daa3a639d7542f3dcd60af640fb294b date_range sequence_reset_period base_cancel_confirm
+        fetch OCA/mis-builder 58a237a5dc85c06a911b87ea4cfca8175ad4a78a mis_builder mis_builder_budget
+        fetch OCA/stock-logistics-barcode 1603617f8cffa040ece5d1d03cf262b7e7b5822e barcodes_generator_abstract barcodes_generator_product
+        fetch OCA/helpdesk 076894a7df4a938d9726fa9724d72275aa5dbbef helpdesk_mgmt
+        fetch OCA/bank-statement-import d1acad803cd5e1e62a77fe12a8b5322dae2f0561 account_statement_import_base account_statement_import_file account_statement_import_file_reconcile_oca account_statement_import_camt account_statement_import_qif account_statement_import_sheet_file account_statement_import_sheet_file_xls account_statement_import_sheet_file_xlsx
+        fetch OCA/account-financial-tools 945186adaf0b23d10a8869f2a58800e33dd7c271 account_journal_lock_date account_move_template
+        fetch OCA/account-payment 5804fc18b27498854b53a8c80c2c749ebaeed250 account_due_list account_payment_return account_payment_return_import account_check_printing_report_base
+        fetch OCA/bank-payment 3eba14117783e6077ef4f9026905d3864d2cabb5 account_payment_mode account_payment_order account_payment_purchase account_payment_sale
+        fetch komit-consulting/stock-logistics-barcode 07c47da8e46ace78f96b81c226ef0b603cade04e stock_barcodes
+        fetch komit-consulting/web 1a11434e3a073d452f44576aa76d06748d582a29 web_widget_numeric_step
+        fetch powermaster888/hlm-odoo-modules 3f9d872003cd712d3fd538f8caaeb5e38bdda397 hlm_security hlm_studio_rebuild
+        fetch OCA/currency 2e53026930455187b7acbe1961ab0b524f29dbd6 currency_rate_update
+        fetch OCA/server-tools e358b4d29645fa6882bc06f01684dd8f2874c742 auditlog base_write_diff
+        fetch OCA/sale-workflow 9c8c601845ff30bd1fbe2e871fa3c5249b3bffe7 sale_order_line_price_history
+        fetch OCA/web e6ced50b0969b4c6635dae60d96532b54e5edb8e web_refresher web_m2x_options
+        fetch OCA/stock-logistics-warehouse dfa8bad1d176b4a811fd92aee9ea2f1c46802798 stock_inventory stock_inventory_lockdown stock_inventory_justification stock_picking_show_linked
+        echo "[addons] modules ready:"
+        ls "$$DEST"
+    volumes:
+      - odoo-community-addons:/mnt/extra-addons
+
+  odoo-community-init:
+    image: odoo:19.0
+    restart: "no"
+    depends_on:
+      odoo-community-db:
+        condition: service_healthy
+      odoo-community-addons:
+        condition: service_completed_successfully
+    entrypoint: ["/bin/bash", "-c"]
+    environment: &odoo_env
+      HOST: odoo-community-db
+      USER: odoo
+      PASSWORD: "LJZkMEV1Nq-delzhTZpvMSGeDvXkEW5m"
+      ADMIN_PASSWORD: "fJL-LPRYzikcb61MV6mEu5FlLw9RIvdr"
+      DB_HOST: odoo-community-db
+      DB_NAME: odoo
+      DB_USER: odoo
+      DB_PASSWORD: "LJZkMEV1Nq-delzhTZpvMSGeDvXkEW5m"
+      ODOO_ADMIN_PASSWORD: "9Tg8QC6zLoduBlvX6B02dQ"
+    command:
+      - |
+        set -e
+        echo "[init] waiting for postgres..."
+        python3 - <<'PYEOF'
+        import os, time, psycopg2
+        for i in range(150):
+            try:
+                psycopg2.connect(host=os.environ['DB_HOST'], dbname=os.environ['DB_NAME'], user=os.environ['DB_USER'], password=os.environ['DB_PASSWORD'], connect_timeout=3).close()
+                print('[init] postgres is ready')
+                break
+            except Exception:
+                time.sleep(2)
+        else:
+            raise SystemExit('[init] postgres never became ready')
+        PYEOF
+        NEED_INIT=$$(python3 - <<'PYEOF'
+        import os, psycopg2
+        required = "point_of_sale,pos_sale,stock,purchase,om_account_accountant,om_account_asset,om_account_budget,om_account_daily_reports,om_account_followup,om_fiscal_year,om_recurring_payments,accounting_pdf_reports,account_financial_report,account_tax_balance,partner_statement,account_reconcile_oca,account_statement_base,date_range,report_xlsx,report_xlsx_helper,mis_builder,mis_builder_budget,barcodes_generator_abstract,barcodes_generator_product,hr,hr_holidays,hr_attendance,hr_org_chart,loyalty,pos_loyalty,sale_loyalty,pos_sale_loyalty,delivery,stock_delivery,stock_landed_costs,calendar,helpdesk_mgmt,l10n_hk,base_automation,base_iban,contacts,pos_hr,payment_custom,account_statement_import_base,account_statement_import_file,account_statement_import_file_reconcile_oca,account_statement_import_camt,account_statement_import_qif,account_statement_import_sheet_file,account_statement_import_sheet_file_xls,account_statement_import_sheet_file_xlsx,account_journal_lock_date,account_due_list,account_payment_mode,account_payment_order,web_widget_numeric_step,stock_barcodes,hlm_security,hlm_studio_rebuild,stock_inventory,stock_inventory_lockdown,stock_inventory_justification,stock_picking_show_linked,auditlog,base_write_diff,currency_rate_update,account_payment_return,account_payment_return_import,account_check_printing_report_base,account_payment_purchase,account_payment_sale,account_move_template,sequence_reset_period,base_cancel_confirm,sale_order_line_price_history,web_refresher,web_m2x_options".split(',')
+        conn = psycopg2.connect(host=os.environ['DB_HOST'], dbname=os.environ['DB_NAME'], user=os.environ['DB_USER'], password=os.environ['DB_PASSWORD'])
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM information_schema.tables WHERE table_name = 'ir_module_module'")
+        if not cur.fetchone():
+            print('yes')
+        else:
+            cur.execute("SELECT name, state FROM ir_module_module WHERE name = ANY(%s)", (required,))
+            states = dict(cur.fetchall())
+            missing = [m for m in required if states.get(m) != 'installed']
+            print('yes' if missing else 'no')
+        PYEOF
+        )
+        echo "[init] need_init=$$NEED_INIT"
+        pip3 install --quiet --user --no-cache-dir python-barcode openpyxl xlrd 2>/dev/null || pip3 install --quiet --break-system-packages --no-cache-dir python-barcode openpyxl xlrd
+        echo "[init] python-barcode openpyxl xlrd ready"
+        if [ "$$NEED_INIT" = "yes" ]; then
+          echo "[init] creating database and installing modules (10+ min)..."
+          /entrypoint.sh odoo -d "$$DB_NAME" -i point_of_sale,pos_sale,stock,purchase,om_account_accountant,om_account_asset,om_account_budget,om_account_daily_reports,om_account_followup,om_fiscal_year,om_recurring_payments,accounting_pdf_reports,account_financial_report,account_tax_balance,partner_statement,account_reconcile_oca,account_statement_base,date_range,report_xlsx,report_xlsx_helper,mis_builder,mis_builder_budget,barcodes_generator_abstract,barcodes_generator_product,hr,hr_holidays,hr_attendance,hr_org_chart,loyalty,pos_loyalty,sale_loyalty,pos_sale_loyalty,delivery,stock_delivery,stock_landed_costs,calendar,helpdesk_mgmt,l10n_hk,base_automation,base_iban,contacts,pos_hr,payment_custom,account_statement_import_base,account_statement_import_file,account_statement_import_file_reconcile_oca,account_statement_import_camt,account_statement_import_qif,account_statement_import_sheet_file,account_statement_import_sheet_file_xls,account_statement_import_sheet_file_xlsx,account_journal_lock_date,account_due_list,account_payment_mode,account_payment_order,web_widget_numeric_step,stock_barcodes,hlm_security,hlm_studio_rebuild,stock_inventory,stock_inventory_lockdown,stock_inventory_justification,stock_picking_show_linked,auditlog,base_write_diff,currency_rate_update,account_payment_return,account_payment_return_import,account_check_printing_report_base,account_payment_purchase,account_payment_sale,account_move_template,sequence_reset_period,base_cancel_confirm,sale_order_line_price_history,web_refresher,web_m2x_options --load-language=zh_TW --without-demo=all --stop-after-init
+        fi
+        echo "[init] setting admin password..."
+        python3 - <<'PYEOF'
+        import os, psycopg2
+        from passlib.hash import pbkdf2_sha512
+        conn = psycopg2.connect(host=os.environ['DB_HOST'], dbname=os.environ['DB_NAME'], user=os.environ['DB_USER'], password=os.environ['DB_PASSWORD'])
+        cur = conn.cursor()
+        cur.execute("UPDATE res_users SET password = %s, active = true WHERE login = 'admin'", (pbkdf2_sha512.hash(os.environ['ODOO_ADMIN_PASSWORD']),))
+        conn.commit()
+        print('[init] admin password updated, rows:', cur.rowcount)
+        PYEOF
+        echo "[init] done"
+    volumes:
+      - odoo-community-filestore:/var/lib/odoo
+      - odoo-community-addons:/mnt/extra-addons:ro
+
+  odoo-community-web:
+    image: odoo:19.0
+    restart: unless-stopped
+    depends_on:
+      odoo-community-db:
+        condition: service_healthy
+      odoo-community-init:
+        condition: service_completed_successfully
+    environment: *odoo_env
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        pip3 install --quiet --user --no-cache-dir python-barcode openpyxl xlrd 2>/dev/null || pip3 install --quiet --break-system-packages --no-cache-dir python-barcode openpyxl xlrd
+        exec /entrypoint.sh odoo -d odoo --proxy-mode
+    volumes:
+      - odoo-community-filestore:/var/lib/odoo
+      - odoo-community-addons:/mnt/extra-addons:ro
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8069/web/login', timeout=10)"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 180s
+    networks:
+      - default
+      - dokploy-network
+
+  odoo-community-backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    depends_on:
+      odoo-community-db:
+        condition: service_healthy
+    environment:
+      PGHOST: odoo-community-db
+      PGUSER: odoo
+      PGPASSWORD: "@POSTGRES_PASSWORD@"
+      PGDATABASE: odoo
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          TS=$$(date +%Y%m%d_%H%M%S)
+          FILE=/backups/odoo_$${TS}.dump
+          echo "[backup] dumping to $$FILE"
+          pg_dump -Fc -f $$FILE && echo "[backup] done" || echo "[backup] FAILED"
+          find /backups -name "odoo_*.dump" -mtime +7 -delete 2>/dev/null || true
+          sleep 86400
+        done
+    volumes:
+      - odoo-community-backups:/backups
+    networks:
+      - default
+
+volumes:
+  odoo-community-backups:
+  odoo-community-db-data:
+  odoo-community-filestore:
+  odoo-community-addons:
+
+networks:
+  dokploy-network:
+    external: true

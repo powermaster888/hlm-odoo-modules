@@ -15,8 +15,6 @@ Rebuilds the 16 custom groups from Odoo Online production:
     "depends": ["base", "account", "stock", "point_of_sale", "sale_management", "purchase"],
     "data": [
         "security/hlm_security_groups.xml",
-        "security/hlm_security_rules.xml",
-        "security/hlm_menu_visibility.xml",
     ],
     "installable": True,
     "application": False,
